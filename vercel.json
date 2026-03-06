@@ -9,16 +9,12 @@
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "server.js"
+      "dest": "server.js",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+      }
     }
   ]
 }
-```
-
-**"Commit changes"** pe click karo ✅
-
----
-
-Vercel **automatically redeploy** kar lega 1-2 minute mein — phir dobara try karo:
-```
-https://tumhara-url.vercel.app/health
