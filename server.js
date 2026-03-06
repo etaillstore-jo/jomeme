@@ -9,6 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(helmet());
+app.set('trust proxy', 1);
 
 const allowedOrigins = [
   "http://localhost:3000",
