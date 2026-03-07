@@ -13,8 +13,6 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
 const analyzeLimiter = rateLimit({
   windowMs: 24 * 60 * 60 * 1000,
   max: 5,
@@ -29,30 +27,28 @@ const generalLimiter = rateLimit({
 
 app.use(generalLimiter);
 
-// ── Health Check ──────────────────────────────────────────────────────────────
+// Health Check
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "SpotAI Backend", timestamp: new Date().toISOString() });
 });
 
-// ── Analyze Photo ─────────────────────────────────────────────────────────────
+// Analyze Photo
 app.post("/api/analyze", analyzeLimiter, async (req, res) => {
   try {
     const { image, mediaType } = req.body;
-
     if (!image || !mediaType) {
       return res.status(400).json({ error: "image and mediaType are required." });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
 
     const prompt = `You are SpotAI, an expert geo-location AI. Analyze this street photo and identify the exact location.
 
-Look for: street signs, language, text, architecture, vegetation, vehicles, road markings, landmarks, license plates, sky, terrain.
-
-Respond ONLY in this exact JSON format — no markdown, no extra text, just pure JSON:
+Respond ONLY in this exact JSON format, no extra text:
 {
   "type": "location_result",
-  "message": "One friendly sentence about what you found",
+  "message": "I found this location!",
   "location": "Full location name",
   "confidence": "High",
   "confidence_pct": 85,
@@ -61,7 +57,7 @@ Respond ONLY in this exact JSON format — no markdown, no extra text, just pure
   "country": "United States",
   "city": "New York",
   "region": "New York State",
-  "reasoning": "2-3 sentences explaining visual clues",
+  "reasoning": "Explain visual clues here",
   "landmarks_nearby": ["Landmark 1", "Landmark 2"],
   "maps_url": "https://www.google.com/maps?q=40.7128,-74.0060"
 }`;
@@ -80,43 +76,39 @@ Respond ONLY in this exact JSON format — no markdown, no extra text, just pure
     res.json({ success: true, result: parsed });
 
   } catch (err) {
-    console.error("Error in /api/analyze:", err.message);
-    res.status(500).json({ error: "Could not analyze image. Please try again." });
+    console.error("Analyze error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── Chat ──────────────────────────────────────────────────────────────────────
+// Chat
 app.post("/api/chat", async (req, res) => {
   try {
     const { message } = req.body;
-
     if (!message) {
       return res.status(400).json({ error: "message is required." });
     }
 
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
-    const prompt = `You are SpotAI, a friendly geo-location AI assistant. Help users with location-related questions. Be helpful and concise.
+    const result = await model.generateContent(
+      `You are SpotAI, a friendly geo-location AI assistant. Answer helpfully and concisely.\n\nUser: ${message}`
+    );
 
-User message: ${message}`;
-
-    const result = await model.generateContent(prompt);
     const reply = result.response.text();
-
-    console.log("Chat reply:", reply.substring(0, 200));
+    console.log("Chat reply:", reply.substring(0, 100));
 
     res.json({ success: true, reply });
 
   } catch (err) {
-    console.error("Error in /api/chat:", err.message);
-    res.status(500).json({ error: err.message || "Something went wrong." });
+    console.error("Chat error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ error: "Route not found." }));
 
-// ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`SpotAI Backend running on port ${PORT}`);
 });
