@@ -2,15 +2,18 @@ const express = require("express");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
- 
-app.set('trust proxy', 1);
+
+app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const analyzeLimiter = rateLimit({
   windowMs: 24 * 60 * 60 * 1000,
@@ -31,35 +34,6 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "SpotAI Backend", timestamp: new Date().toISOString() });
 });
 
-// ── Helper: Call Gemini ───────────────────────────────────────────────────────
-async function callGemini(parts) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`;
-  
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 1000 }
-    })
-  });
-
-  const data = await res.json();
-  
-  // Log full response for debugging
-  console.log("Gemini raw response:", JSON.stringify(data).substring(0, 800));
-
-  // Extract text from response
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  
-  if (!text) {
-    console.error("No text in Gemini response:", JSON.stringify(data));
-    throw new Error("Empty response from Gemini");
-  }
-
-  return text.trim();
-}
-
 // ── Analyze Photo ─────────────────────────────────────────────────────────────
 app.post("/api/analyze", analyzeLimiter, async (req, res) => {
   try {
@@ -69,9 +43,7 @@ app.post("/api/analyze", analyzeLimiter, async (req, res) => {
       return res.status(400).json({ error: "image and mediaType are required." });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({ error: "API key missing." });
-    }
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `You are SpotAI, an expert geo-location AI. Analyze this street photo and identify the exact location.
 
@@ -94,10 +66,13 @@ Respond ONLY in this exact JSON format — no markdown, no extra text, just pure
   "maps_url": "https://www.google.com/maps?q=40.7128,-74.0060"
 }`;
 
-    const text = await callGemini([
-      { inline_data: { mime_type: mediaType, data: image } },
-      { text: prompt }
+    const result = await model.generateContent([
+      { inlineData: { mimeType: mediaType, data: image } },
+      prompt
     ]);
+
+    const text = result.response.text();
+    console.log("Gemini response:", text.substring(0, 300));
 
     const clean = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
@@ -119,19 +94,22 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error: "message is required." });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({ error: "API key missing." });
-    }
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    const systemPrompt = `You are SpotAI, a friendly geo-location AI assistant. Help users with location questions. Be helpful and concise.\n\nUser: ${message}`;
+    const prompt = `You are SpotAI, a friendly geo-location AI assistant. Help users with location-related questions. Be helpful and concise.
 
-    const reply = await callGemini([{ text: systemPrompt }]);
+User message: ${message}`;
+
+    const result = await model.generateContent(prompt);
+    const reply = result.response.text();
+
+    console.log("Chat reply:", reply.substring(0, 200));
 
     res.json({ success: true, reply });
 
   } catch (err) {
     console.error("Error in /api/chat:", err.message);
-    res.status(500).json({ error: "Something went wrong. Please try again." });
+    res.status(500).json({ error: err.message || "Something went wrong." });
   }
 });
 
