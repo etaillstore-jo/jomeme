@@ -127,7 +127,7 @@ app.post("/api/chat", async (req, res) => {
         role: "user",
         content: message
       }
-    ], "meta-llama/llama-3.1-8b-instruct:free");
+    ], "meta-llama/llama-3.2-3b-instruct:free");
 
     res.json({ success: true, reply });
 
