@@ -62,6 +62,12 @@ async function askGemini(parts) {
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "SpotAI", timestamp: new Date().toISOString() });
 });
+app.get("/api/listmodels", async (req, res) => {
+  const key = process.env.GEMINI_API_KEY;
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+  const d = await r.json();
+  res.json(d);
+});
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
 app.post("/api/chat", async (req, res) => {
