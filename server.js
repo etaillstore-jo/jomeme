@@ -10,92 +10,75 @@ app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
+const analyzeLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 20,
+  message: { error: "Daily limit reached. Upgrade to Pro!" },
+});
+
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
 });
 
-const analyzeLimiter = rateLimit({
-  windowMs: 24 * 60 * 60 * 1000,
-  max: 5,
-  message: { error: "Daily free limit reached (5 photos/day). Upgrade to Pro!" },
-});
-
 app.use(generalLimiter);
 
-// ── Gemini API call ───────────────────────────────────────────────────────────
-async function askGemini(parts) {
-  const key = process.env.GEMINI_API_KEY;
-  const model = "gemini-2.0-flash";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-
-  const body = {
-    contents: [{ role: "user", parts }],
-    generationConfig: { temperature: 0.2, maxOutputTokens: 1024 }
-  };
-
-  const resp = await fetch(url, {
+// ── OpenRouter API call ───────────────────────────────────────────────────────
+async function callOpenRouter(messages, model = "meta-llama/llama-3.2-11b-vision-instruct:free") {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
+    headers: {
+      "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://spotai-frontend.vercel.app",
+      "X-Title": "SpotAI"
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      max_tokens: 1000,
+      temperature: 0.2
+    })
   });
 
-  const data = await resp.json();
-  console.log("Status:", resp.status);
-  console.log("Response keys:", Object.keys(data));
+  const data = await res.json();
+  console.log("OpenRouter status:", res.status);
 
   if (data.error) {
-    console.error("Gemini error:", JSON.stringify(data.error));
-    throw new Error(data.error.message || "Gemini API error");
+    console.error("OpenRouter error:", JSON.stringify(data.error));
+    throw new Error(data.error.message || "OpenRouter API error");
   }
 
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const text = data?.choices?.[0]?.message?.content;
   if (!text) {
-    console.error("Full response:", JSON.stringify(data).substring(0, 500));
-    throw new Error("Empty response from Gemini");
+    console.error("Empty response:", JSON.stringify(data).substring(0, 400));
+    throw new Error("Empty response from AI");
   }
 
   return text.trim();
 }
 
-// ── Health ────────────────────────────────────────────────────────────────────
+// ── Health Check ──────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "SpotAI", timestamp: new Date().toISOString() });
-});
-app.get("/api/listmodels", async (req, res) => {
-  const key = process.env.GEMINI_API_KEY;
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
-  const d = await r.json();
-  res.json(d);
-});
-
-// ── Chat ──────────────────────────────────────────────────────────────────────
-app.post("/api/chat", async (req, res) => {
-  try {
-    const { message } = req.body;
-    if (!message) return res.status(400).json({ error: "message required" });
-
-    const reply = await askGemini([{
-      text: `You are SpotAI, a friendly geo-location AI assistant. Answer helpfully.\n\nUser: ${message}`
-    }]);
-
-    res.json({ success: true, reply });
-  } catch (err) {
-    console.error("Chat error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
 });
 
 // ── Analyze Photo ─────────────────────────────────────────────────────────────
 app.post("/api/analyze", analyzeLimiter, async (req, res) => {
   try {
     const { image, mediaType } = req.body;
-    if (!image || !mediaType) return res.status(400).json({ error: "image and mediaType required" });
+    if (!image || !mediaType) {
+      return res.status(400).json({ error: "image and mediaType are required." });
+    }
 
-    const prompt = `You are SpotAI. Analyze this photo and identify the location. Reply ONLY in this JSON format, no markdown:
+    const prompt = `You are SpotAI, an expert geo-location AI. Analyze this street photo carefully.
+
+Look for: street signs, language/text, architecture style, vegetation, vehicles, road markings, landmarks, license plates, terrain, sky.
+
+Reply ONLY with this exact JSON — no markdown, no explanation, just raw JSON:
 {
   "type": "location_result",
-  "message": "Found the location!",
+  "message": "I found this location!",
   "location": "City, Country",
   "confidence": "High",
   "confidence_pct": 85,
@@ -104,14 +87,19 @@ app.post("/api/analyze", analyzeLimiter, async (req, res) => {
   "country": "India",
   "city": "New Delhi",
   "region": "Delhi",
-  "reasoning": "Visual clues explanation",
-  "landmarks_nearby": ["Landmark 1"],
+  "reasoning": "Explain the visual clues you used",
+  "landmarks_nearby": ["Landmark 1", "Landmark 2"],
   "maps_url": "https://www.google.com/maps?q=28.6139,77.2090"
 }`;
 
-    const text = await askGemini([
-      { inline_data: { mime_type: mediaType, data: image } },
-      { text: prompt }
+    const text = await callOpenRouter([
+      {
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:${mediaType};base64,${image}` } },
+          { type: "text", text: prompt }
+        ]
+      }
     ]);
 
     const clean = text.replace(/```json|```/g, "").trim();
@@ -120,6 +108,31 @@ app.post("/api/analyze", analyzeLimiter, async (req, res) => {
 
   } catch (err) {
     console.error("Analyze error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: "message is required." });
+
+    const reply = await callOpenRouter([
+      {
+        role: "system",
+        content: "You are SpotAI, a friendly and helpful geo-location AI assistant. Help users with location questions. Be concise and helpful."
+      },
+      {
+        role: "user",
+        content: message
+      }
+    ], "meta-llama/llama-3.1-8b-instruct:free");
+
+    res.json({ success: true, reply });
+
+  } catch (err) {
+    console.error("Chat error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
