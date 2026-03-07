@@ -148,7 +148,11 @@ app.post("/api/chat", async (req, res) => {
     );
 
     const data = await geminiRes.json();
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() 
+  || data?.candidates?.[0]?.output 
+  || data?.text 
+  || null;
+console.log('Full Gemini response:', JSON.stringify(data).substring(0, 500));
 
 console.log('Gemini reply:', reply);
 res.json({ success: true, reply: reply || 'No response from AI' });
