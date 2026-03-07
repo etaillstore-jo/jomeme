@@ -26,7 +26,7 @@ app.use(generalLimiter);
 // ── Gemini API call ───────────────────────────────────────────────────────────
 async function askGemini(parts) {
   const key = process.env.GEMINI_API_KEY;
-  const model = "gemini-2.0-flash-exp";
+  const model = "gemini-2.0-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
 
   const body = {
