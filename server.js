@@ -43,7 +43,7 @@ app.post("/api/analyze", analyzeLimiter, async (req, res) => {
       return res.status(400).json({ error: "image and mediaType are required." });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
     const prompt = `You are SpotAI, an expert geo-location AI. Analyze this street photo and identify the exact location.
 
@@ -94,7 +94,7 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error: "message is required." });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
     const prompt = `You are SpotAI, a friendly geo-location AI assistant. Help users with location-related questions. Be helpful and concise.
 
