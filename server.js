@@ -23,23 +23,22 @@ const generalLimiter = rateLimit({
 
 app.use(generalLimiter);
 
-// ── OpenRouter call with auto fallback ───────────────────────────────────────
-async function callOpenRouter(messages, isVision = false) {
+// ── Groq API call with auto fallback ─────────────────────────────────────────
+async function callGroq(messages, isVision = false) {
   // Vision models (photo analysis)
   const visionModels = [
-    "google/gemma-3-27b-it:free",
-    "google/gemma-3-12b-it:free",
-    "meta-llama/llama-3.2-11b-vision-instruct:free",
-    "google/gemma-3-4b-it:free"
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "llama-3.2-90b-vision-preview",
+    "llama-3.2-11b-vision-preview",
   ];
 
   // Chat models (text only)
   const chatModels = [
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "deepseek/deepseek-chat-v3-0324:free",
-    "google/gemma-3-27b-it:free",
-    "qwen/qwen3-8b:free",
-    "google/gemma-3-12b-it:free"
+    "llama-3.3-70b-versatile",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
+    "gemma2-9b-it",
+    "mixtral-8x7b-32768",
   ];
 
   const models = isVision ? visionModels : chatModels;
@@ -47,21 +46,20 @@ async function callOpenRouter(messages, isVision = false) {
 
   for (const model of models) {
     try {
-      console.log(`Trying model: ${model}`);
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      console.log(`Trying Groq model: ${model}`);
+
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": "https://spotai-frontend.vercel.app",
-          "X-Title": "SpotAI"
         },
         body: JSON.stringify({
           model,
           messages,
           max_tokens: 1000,
-          temperature: 0.2
-        })
+          temperature: 0.2,
+        }),
       });
 
       const data = await res.json();
@@ -78,7 +76,7 @@ async function callOpenRouter(messages, isVision = false) {
         continue;
       }
 
-      console.log(`Success with model: ${model}`);
+      console.log(`Success with Groq model: ${model}`);
       return text.trim();
 
     } catch (err) {
@@ -88,7 +86,7 @@ async function callOpenRouter(messages, isVision = false) {
     }
   }
 
-  throw new Error(lastError || "All models failed. Please try again.");
+  throw new Error(lastError || "All Groq models failed. Please try again.");
 }
 
 // ── Health Check ──────────────────────────────────────────────────────────────
@@ -102,7 +100,7 @@ app.post("/api/chat", async (req, res) => {
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: "message is required." });
 
-    const reply = await callOpenRouter([
+    const reply = await callGroq([
       {
         role: "system",
         content: `You are SpotAI, the world's most advanced AI geo-location assistant created by SpotAI.com.
@@ -120,9 +118,9 @@ Your capabilities:
 - Share interesting facts about cities and locations
 - Help with travel and geography questions
 
-Always respond in the same language the user writes in (Hindi, English, etc).`
+Always respond in the same language the user writes in (Hindi, English, etc).`,
       },
-      { role: "user", content: message }
+      { role: "user", content: message },
     ], false);
 
     res.json({ success: true, reply });
@@ -162,19 +160,18 @@ Reply ONLY with this exact JSON — no markdown, no backticks, no explanation, j
   "maps_url": "https://www.google.com/maps?q=28.6139,77.2090"
 }`;
 
-    const text = await callOpenRouter([
+    const text = await callGroq([
       {
         role: "user",
         content: [
           { type: "image_url", image_url: { url: `data:${mediaType};base64,${image}` } },
-          { type: "text", text: prompt }
-        ]
-      }
+          { type: "text", text: prompt },
+        ],
+      },
     ], true);
 
     // Clean and parse JSON
     let clean = text.replace(/```json|```/g, "").trim();
-    // Find JSON object in response
     const jsonMatch = clean.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("Could not parse location data.");
     const parsed = JSON.parse(jsonMatch[0]);
